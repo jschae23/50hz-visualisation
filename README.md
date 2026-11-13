@@ -4,8 +4,7 @@ An interactive visualization of a 50 Hz sine wave: fifty complete cycles per sec
 
 <img width="1036" height="782" alt="image" src="https://github.com/user-attachments/assets/c148bba8-0773-43f0-b2bf-ae395a71ecf2" />
 
-**Live demo:** `[https://<username>.github.io/<repo>/](https://jschae23.github.io/50hz-visualisation/)`
-
+**Live demo:** https://jschae23.github.io/50hz-visualisation
 ## What it shows
 
 - **Oscilloscope view.** Three cycles (60 ms) of the wave, with a playhead that traces it out.
