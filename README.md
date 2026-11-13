@@ -2,9 +2,10 @@
 
 An interactive visualization of a 50 Hz sine wave: fifty complete cycles per second, so one cycle lasts exactly 20 milliseconds. 50 Hz is the mains frequency used across Europe, Asia, Africa and much of South America.
 
+**Live demo:** https://jschae23.github.io/50hz-visualisation
+
 <img width="1036" height="782" alt="image" src="https://github.com/user-attachments/assets/c148bba8-0773-43f0-b2bf-ae395a71ecf2" />
 
-**Live demo:** https://jschae23.github.io/50hz-visualisation
 ## What it shows
 
 - **Oscilloscope view.** Three cycles (60 ms) of the wave, with a playhead that traces it out.
