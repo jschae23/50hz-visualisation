@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>50 Hz</title>
+<style>
+:root{
+  --paper:#f3f5f0; --ink:#1b2a3a; --muted:#5d6b78; --grid:#d5dbd2; --grid-strong:#aeb8ad;
+  --trace:#0d4f8b; --ghost:#9db8d0; --accent:#c8321f; --card:#fbfcf9;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#14191f; --ink:#e6ebf0; --muted:#93a1ae; --grid:#263039; --grid-strong:#3b4854;
+    --trace:#6fb4f0; --ghost:#35526b; --accent:#ff7a5c; --card:#1a2027; color-scheme: dark;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  background:var(--paper); color:var(--ink);
+  font:17px/1.55 "Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+  padding:clamp(16px,4vw,48px);
+}
+main{max-width:960px;margin:0 auto}
+h1{font-size:clamp(3.2rem,12vw,6.5rem);line-height:.95;margin:0 0 .2em;font-weight:400;letter-spacing:-.02em}
+h1 small{font-size:.38em;color:var(--muted);letter-spacing:0;margin-left:.15em}
+.lede{max-width:52ch;margin:0 0 1.6rem;color:var(--muted)}
+.panel{background:var(--card);border:1px solid var(--grid-strong);border-radius:6px;padding:12px}
+canvas{display:block;width:100%}
+#scope{height:300px}
+.row{display:grid;grid-template-columns:1fr 260px;gap:16px;margin-top:16px}
+@media (max-width:700px){.row{grid-template-columns:1fr}}
+#phasor{height:260px}
+.controls{display:flex;flex-direction:column;gap:14px;justify-content:center}
+label{display:block;font-size:.92rem;color:var(--muted);margin-bottom:4px}
+input[type=range]{width:100%;accent-color:var(--trace)}
+.btns{display:flex;gap:8px;flex-wrap:wrap}
+button{
+  font:inherit;font-size:.95rem;color:var(--ink);background:transparent;
+  border:1px solid var(--grid-strong);border-radius:4px;padding:6px 14px;cursor:pointer;
+}
+button:hover{border-color:var(--trace)}
+button[aria-pressed="true"]{background:var(--trace);color:var(--paper);border-color:var(--trace)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+dl{display:grid;grid-template-columns:auto 1fr;gap:2px 14px;margin:0;font:.95rem/1.5 ui-monospace,Menlo,Consolas,monospace}
+dt{color:var(--muted)} dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
+.note{font-size:.88rem;color:var(--muted);margin-top:1.4rem;max-width:62ch}
+</style>
+</head>
+<body>
+<main>
+  <h1>50<small>Hz</small></h1>
+  <p class="lede">Fifty complete cycles every second, so one cycle lasts exactly 20 milliseconds. That is the rhythm of mains electricity across Europe, Asia, Africa and much of South America. Slow it down to watch it turn.</p>
+
+  <div class="panel"><canvas id="scope" role="img" aria-label="Sine wave at 50 hertz shown over 60 milliseconds, three cycles"></canvas></div>
+
+  <div class="row">
+    <div class="panel controls">
+      <div>
+        <label for="slow">Slow motion: <span id="slowLabel"></span></label>
+        <input id="slow" type="range" min="0" max="3" step="0.01" value="1.7">
+      </div>
+      <div class="btns">
+        <button id="play" aria-pressed="false">Pause</button>
+        <button id="sound" aria-pressed="false">Hear it</button>
+      </div>
+      <dl>
+        <dt>frequency</dt><dd>50 Hz</dd>
+        <dt>period</dt><dd>20 ms</dd>
+        <dt>time</dt><dd id="rT">0.0 ms</dd>
+        <dt>phase</dt><dd id="rP">0°</dd>
+        <dt>value</dt><dd id="rV">0.00</dd>
+      </dl>
+    </div>
+    <div class="panel"><canvas id="phasor" role="img" aria-label="Rotating vector whose vertical height traces the sine wave"></canvas></div>
+  </div>
+
+  <p class="note">The arrow on the right turns once per cycle; its height is the wave’s value. Sound needs headphones or a subwoofer, since most laptop and phone speakers can’t reproduce 50 Hz.</p>
+</main>
+
+<script>
+(function(){
+  var F = 50, WIN = 0.060;               // frequency (Hz), visible window (s)
+  var scope = document.getElementById('scope'), ph = document.getElementById('phasor');
+  var sctx = scope.getContext('2d'), pctx = ph.getContext('2d');
+  var slow = document.getElementById('slow'), slowLabel = document.getElementById('slowLabel');
+  var playBtn = document.getElementById('play'), soundBtn = document.getElementById('sound');
+  var rT = document.getElementById('rT'), rP = document.getElementById('rP'), rV = document.getElementById('rV');
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var playing = !reduce, simT = 0, last = performance.now(), dpr = 1;
+  var audio = null, osc = null;
+
+  function css(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+  function factor(){ return Math.pow(10, parseFloat(slow.value)); }
+
+  function fit(c){
+    dpr = window.devicePixelRatio || 1;
+    var r = c.getBoundingClientRect();
+    c.width = Math.round(r.width * dpr); c.height = Math.round(r.height * dpr);
+    return {w:r.width, h:r.height};
+  }
+
+  function drawScope(){
+    var s = fit(scope), w = s.w, h = s.h, ctx = sctx;
+    ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,h);
+    var padL = 34, padR = 12, padT = 14, padB = 28;
+    var pw = w - padL - padR, ph_ = h - padT - padB, mid = padT + ph_/2, amp = ph_/2 * .88;
+    var X = function(t){ return padL + t/WIN*pw; };
+    var Y = function(v){ return mid - v*amp; };
+    ctx.font = '12px ui-monospace,Menlo,Consolas,monospace'; ctx.textBaseline = 'middle';
+    // grid: every 5 ms, strong every 20 ms (one cycle)
+    for (var ms = 0; ms <= 60; ms += 5){
+      var x = X(ms/1000); ctx.strokeStyle = ms % 20 === 0 ? css('--grid-strong') : css('--grid');
+      ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x,padT); ctx.lineTo(x,padT+ph_); ctx.stroke();
+      if (ms % 10 === 0){ ctx.fillStyle = css('--muted'); ctx.textAlign = 'center'; ctx.fillText(ms + ' ms', x, h - 10); }
+    }
+    [-1,-.5,0,.5,1].forEach(function(v){
+      ctx.strokeStyle = v === 0 ? css('--grid-strong') : css('--grid');
+      ctx.beginPath(); ctx.moveTo(padL,Y(v)); ctx.lineTo(padL+pw,Y(v)); ctx.stroke();
+      if (v % 1 === 0){ ctx.fillStyle = css('--muted'); ctx.textAlign = 'right'; ctx.fillText((v>0?'+':'')+v, padL-6, Y(v)); }
+    });
+    // playhead position inside window
+    var tp = simT % WIN;
+    function trace(t0,t1){
+      ctx.beginPath();
+      for (var i = 0; i <= 240; i++){
+        var t = t0 + (t1-t0)*i/240, px = X(t), py = Y(Math.sin(2*Math.PI*F*t));
+        i ? ctx.lineTo(px,py) : ctx.moveTo(px,py);
+      }
+      ctx.stroke();
+    }
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = 2.5;
+    ctx.strokeStyle = css('--ghost'); trace(0, WIN);
+    ctx.strokeStyle = css('--trace'); trace(0, tp);
+    // playhead
+    var hx = X(tp), hy = Y(Math.sin(2*Math.PI*F*tp));
+    ctx.strokeStyle = css('--accent'); ctx.lineWidth = 1.5; ctx.setLineDash([4,4]);
+    ctx.beginPath(); ctx.moveTo(hx,padT); ctx.lineTo(hx,padT+ph_); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = css('--accent'); ctx.beginPath(); ctx.arc(hx,hy,5.5,0,7); ctx.fill();
+    return tp;
+  }
+
+  function drawPhasor(tp){
+    var s = fit(ph), w = s.w, h = s.h, ctx = pctx;
+    ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,h);
+    var cx = w/2, cy = h/2, R = Math.min(w,h)/2 - 18;
+    var a = 2*Math.PI*F*tp;
+    ctx.lineWidth = 1; ctx.strokeStyle = css('--grid-strong');
+    ctx.beginPath(); ctx.arc(cx,cy,R,0,7); ctx.stroke();
+    ctx.strokeStyle = css('--grid');
+    ctx.beginPath(); ctx.moveTo(cx-R-8,cy); ctx.lineTo(cx+R+8,cy); ctx.moveTo(cx,cy-R-8); ctx.lineTo(cx,cy+R+8); ctx.stroke();
+    // swept angle
+    ctx.fillStyle = css('--ghost'); ctx.globalAlpha = .45;
+    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.arc(cx,cy,R*.28,0,-(a%(2*Math.PI)),true); ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
+    var px = cx + R*Math.cos(a), py = cy - R*Math.sin(a);
+    // projection onto vertical axis
+    ctx.strokeStyle = css('--accent'); ctx.setLineDash([4,4]); ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(px,py); ctx.lineTo(cx,py); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = css('--accent'); ctx.beginPath(); ctx.arc(cx,py,4.5,0,7); ctx.fill();
+    // vector
+    ctx.strokeStyle = css('--trace'); ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(px,py); ctx.stroke();
+    ctx.fillStyle = css('--trace'); ctx.beginPath(); ctx.arc(px,py,5.5,0,7); ctx.fill();
+  }
+
+  function readouts(tp){
+    var a = ((2*Math.PI*F*tp) % (2*Math.PI)) * 180/Math.PI, v = Math.sin(2*Math.PI*F*tp);
+    rT.textContent = (tp*1000).toFixed(1) + ' ms';
+    rP.textContent = Math.round(a) + '°';
+    rV.textContent = (v>=0?'+':'') + v.toFixed(2);
+  }
+
+  function labelSlow(){
+    var f = factor(), cyc = f/F;
+    slowLabel.textContent = (f < 1.5 ? 'real time (blurs)' : Math.round(f) + '× slower') +
+      (f >= 1.5 ? ', one cycle per ' + (cyc < 1 ? Math.round(cyc*1000) + ' ms' : cyc.toFixed(1) + ' s') : '');
+  }
+
+  function frame(now){
+    var dt = Math.min(.1, (now - last)/1000); last = now;
+    if (playing) simT += dt / factor();
+    var tp = drawScope(); drawPhasor(simT % WIN); readouts(simT % WIN);
+    requestAnimationFrame(frame);
+  }
+
+  slow.addEventListener('input', labelSlow);
+  playBtn.addEventListener('click', function(){
+    playing = !playing; playBtn.textContent = playing ? 'Pause' : 'Play'; playBtn.setAttribute('aria-pressed', !playing);
+  });
+  soundBtn.addEventListener('click', function(){
+    try{
+      if (!audio){
+        audio = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (osc){ osc.stop(); osc = null; soundBtn.setAttribute('aria-pressed','false'); soundBtn.textContent = 'Hear it'; return; }
+      osc = audio.createOscillator(); var g = audio.createGain();
+      osc.type = 'sine'; osc.frequency.value = F; g.gain.value = .25;
+      osc.connect(g); g.connect(audio.destination); audio.resume(); osc.start();
+      soundBtn.setAttribute('aria-pressed','true'); soundBtn.textContent = 'Stop sound';
+    }catch(e){ soundBtn.disabled = true; soundBtn.textContent = 'Sound unavailable'; }
+  });
+  if (reduce){ playBtn.textContent = 'Play'; playBtn.setAttribute('aria-pressed','true'); }
+  labelSlow(); requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
