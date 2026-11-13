@@ -46,7 +46,7 @@ dt{color:var(--muted)} dd{margin:0;text-align:right;font-variant-numeric:tabular
 .note{font-size:.88rem;color:var(--muted);margin-top:1.4rem;max-width:62ch}
 .panel.wide{overflow-x:auto}
 .panel.wide canvas{min-width:720px}
-.tabs{display:flex;gap:4px;border-bottom:1px solid var(--grid-strong);margin-bottom:1.4rem}
+.tabs{display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid var(--grid-strong);margin-bottom:1.4rem}
 .tabs button{border:0;border-bottom:3px solid transparent;border-radius:0;padding:8px 16px;color:var(--muted);margin-bottom:-1px}
 .tabs button:hover{border-color:transparent;color:var(--ink)}
 .tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
@@ -58,6 +58,8 @@ dt{color:var(--muted)} dd{margin:0;text-align:right;font-variant-numeric:tabular
     <button role="tab" id="tab-circle" data-mode="circle" aria-selected="true">Circle &amp; wave</button>
     <button role="tab" id="tab-generator" data-mode="generator" aria-selected="false" tabindex="-1">Generator</button>
     <button role="tab" id="tab-steam" data-mode="steam" aria-selected="false" tabindex="-1">Steam engine</button>
+    <button role="tab" id="tab-wind" data-mode="wind" aria-selected="false" tabindex="-1">Wind turbine</button>
+    <button role="tab" id="tab-solar" data-mode="solar" aria-selected="false" tabindex="-1">Solar panel</button>
   </div>
   <h1>50<small>Hz</small></h1>
   <p class="lede" id="lede">Fifty complete cycles every second, so one cycle lasts exactly 20 milliseconds. That is the rhythm of mains electricity across Europe, Asia, Africa and much of South America. Slow it down to watch a circle draw the wave.</p>
@@ -100,6 +102,20 @@ dt{color:var(--muted)} dd{margin:0;text-align:right;font-variant-numeric:tabular
   function css(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
   function factor(){ return Math.pow(10, parseFloat(slow.value)); }
 
+  var FC = 1000;                                   // inverter switching frequency as drawn (Hz)
+  function pulse(t){                                // sine-triangle PWM: +1 or -1
+    var u = ((t*FC) % 1 + 1) % 1;
+    return Math.sin(TAU*F*t) > 1.1*(4*Math.abs(u - .5) - 1) ? 1 : -1;
+  }
+  function gear(x, y, r, n, rot){                   // toothed wheel; fill/stroke set by caller
+    ctx.save(); ctx.translate(x,y); ctx.rotate(rot); ctx.beginPath();
+    for (var i = 0; i < 4*n; i++){
+      var th = i*TAU/(4*n), rr = (i % 4 < 2) ? r : r*.88;
+      i ? ctx.lineTo(rr*Math.cos(th), rr*Math.sin(th)) : ctx.moveTo(rr*Math.cos(th), rr*Math.sin(th));
+    }
+    ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+  }
+
   function draw(){
     dpr = window.devicePixelRatio || 1;
     var r = stage.getBoundingClientRect(), w = r.width, h = r.height;
@@ -107,15 +123,19 @@ dt{color:var(--muted)} dd{margin:0;text-align:right;font-variant-numeric:tabular
     ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,h);
 
     var padT = 16, padB = 30, padL = 12, padR = 14;
-    var steam = mode === 'steam', gen = mode !== 'circle';   // gen: alternator-style figure
-    var E = gen ? 1.4 : 1, lead = steam ? 2.75 : E;          // right / left extent of the figure, in units of R
-    var R = steam ? Math.min((h-padT-padB)/2/E, (w*.56-padL-6)/(lead+E))
-                  : Math.min((h-padT-padB)/2/E, w*0.2/E);
+    var steam = mode === 'steam', wind = mode === 'wind', solar = mode === 'solar';
+    var gen = mode === 'generator' || steam || wind;           // alternator-style figure
+    var E = gen ? 1.4 : 1, lead = steam ? 2.75 : wind ? 4.5 : E;   // right / left extent, in units of R
+    var EH = wind ? 1.5 : E;                                   // vertical extent
+    var R = solar ? (h-padT-padB)/2*.8
+          : (steam || wind) ? Math.min((h-padT-padB)/2/EH, (w*(wind ? .58 : .56)-padL-6)/(lead+E))
+          : Math.min((h-padT-padB)/2/E, w*0.2/E);
     var cx = padL + R*lead + 6, cy = padT + (h-padT-padB)/2;
-    var x0 = cx + R*E + Math.min(64, w*0.08), x1 = w - padR, pw = x1 - x0;
+    var ix = w*.3, bw = Math.min(120, w*.14);                  // solar: inverter box
+    var x0 = solar ? ix + bw + 56 : cx + R*E + Math.min(64, w*0.08), x1 = w - padR, pw = x1 - x0;
     var X = function(age){ return x0 + age/WIN*pw; };
     var grid = css('--grid'), strong = css('--grid-strong'), muted = css('--muted');
-    var trace = css('--trace'), accent = css('--accent');
+    var trace = css('--trace'), accent = css('--accent'), card = css('--card'), ink = css('--ink');
 
     // wave grid: a line every 5 ms, stronger every 20 ms (one cycle)
     ctx.font = '12px ui-monospace,Menlo,Consolas,monospace'; ctx.textBaseline = 'middle'; ctx.lineWidth = 1;
@@ -135,16 +155,8 @@ dt{color:var(--muted)} dd{margin:0;text-align:right;font-variant-numeric:tabular
 
     var a = TAU*F*simT, px = cx + R*Math.cos(a), py = cy - R*Math.sin(a);
     var swept = ((a % TAU) + TAU) % TAU;
-    if (!gen){
-      // circle with axes
-      ctx.strokeStyle = strong;
-      ctx.beginPath(); ctx.arc(cx,cy,R,0,TAU); ctx.stroke();
-      ctx.strokeStyle = grid;
-      ctx.beginPath(); ctx.moveTo(cx-R-6,cy); ctx.lineTo(cx+R+6,cy); ctx.moveTo(cx,cy-R-6); ctx.lineTo(cx,cy+R+6); ctx.stroke();
-      ctx.fillStyle = css('--ghost'); ctx.globalAlpha = .45;
-      ctx.beginPath(); ctx.moveTo(cx,cy); ctx.arc(cx,cy,R*.26,0,-swept,true); ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
-    } else if (!steam) {
-      // alternator: iron stator ring, two copper coils, spinning bar-magnet rotor
+    if (solar){ px = ix + bw; py = cy - R*pulse(simT); }   // output level of the inverter
+    function alternator(){
       ctx.lineWidth = R*.26; ctx.strokeStyle = strong;
       ctx.beginPath(); ctx.arc(cx,cy,R*1.25,0,TAU); ctx.stroke();
       var k = Math.abs(Math.sin(a));              // coil glows with |voltage|
@@ -166,7 +178,18 @@ dt{color:var(--muted)} dd{margin:0;text-align:right;font-variant-numeric:tabular
       ctx.restore();
       ctx.fillStyle = css('--paper'); ctx.beginPath(); ctx.arc(cx,cy,R*.06,0,TAU); ctx.fill();
       ctx.textAlign = 'left'; ctx.font = '12px ui-monospace,Menlo,Consolas,monospace';
-    } else {
+    }
+    if (mode === 'circle'){
+      // circle with axes
+      ctx.strokeStyle = strong;
+      ctx.beginPath(); ctx.arc(cx,cy,R,0,TAU); ctx.stroke();
+      ctx.strokeStyle = grid;
+      ctx.beginPath(); ctx.moveTo(cx-R-6,cy); ctx.lineTo(cx+R+6,cy); ctx.moveTo(cx,cy-R-6); ctx.lineTo(cx,cy+R+6); ctx.stroke();
+      ctx.fillStyle = css('--ghost'); ctx.globalAlpha = .45;
+      ctx.beginPath(); ctx.moveTo(cx,cy); ctx.arc(cx,cy,R*.26,0,-swept,true); ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
+    } else if (mode === 'generator') {
+      alternator();
+    } else if (steam) {
       // horizontal steam engine; its flywheel carries the alternator's magnet poles
       var rc = R*.38, L = R*1.6, Pr = R*.6, card = css('--card'), ink = css('--ink');
       var pinx = cx + rc*Math.cos(a), piny = cy - rc*Math.sin(a);
@@ -211,8 +234,83 @@ dt{color:var(--muted)} dd{margin:0;text-align:right;font-variant-numeric:tabular
       ctx.fillStyle = muted; ctx.font = '12px ui-monospace,Menlo,Consolas,monospace'; ctx.textBaseline = 'middle';
       ctx.fillText('cylinder & piston', (xl+xr)/2, h-10); ctx.fillText('flywheel + rotor', cx, h-10); ctx.fillText('coil', cx+1.25*R, h-10);
       ctx.textAlign = 'left';
+    } else if (wind) {
+      // blades turn slowly (cw), a 4:1 gearbox spins the generator rotor (ccw) at the full cycle rate
+      var Lb = R*1.45, cxS = cx - 2.1*R, cxB = cxS - .94*R, gy = cy + 1.5*R;
+      ctx.fillStyle = strong;                                                       // tower and ground
+      ctx.beginPath(); ctx.moveTo(cxB-.05*R,cy); ctx.lineTo(cxB+.05*R,cy); ctx.lineTo(cxB+.11*R,gy); ctx.lineTo(cxB-.11*R,gy); ctx.fill();
+      ctx.fillRect(cxB-1.45*R, gy, 2.9*R, 2);
+      ctx.lineWidth = 1.2; ctx.strokeStyle = muted; ctx.fillStyle = card;
+      gear(cxB, cy, R*.8, 24, a/4);
+      ctx.fillStyle = strong; gear(cxS, cy, R*.2, 6, -a);
+      ctx.strokeStyle = muted; ctx.lineWidth = R*.06; ctx.beginPath(); ctx.moveTo(cxS,cy); ctx.lineTo(cx,cy); ctx.stroke();   // shaft to the generator
+      alternator();
+      ctx.save(); ctx.translate(cxB,cy); ctx.rotate(a/4);                           // three blades
+      ctx.fillStyle = card; ctx.strokeStyle = ink; ctx.lineWidth = 1.5;
+      for (var bl = 0; bl < 3; bl++){
+        ctx.beginPath(); ctx.moveTo(.1*R,-.08*R); ctx.lineTo(.45*R,-.07*R); ctx.lineTo(Lb,-.012*R); ctx.lineTo(Lb,.012*R); ctx.lineTo(.45*R,.05*R); ctx.lineTo(.1*R,.06*R);
+        ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.rotate(TAU/3);
+      }
+      ctx.restore();
+      ctx.fillStyle = ink; ctx.beginPath(); ctx.arc(cxB,cy,R*.1,0,TAU); ctx.fill();
+      ctx.fillStyle = muted; ctx.font = '12px ui-monospace,Menlo,Consolas,monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('blades', cxB, h-10); ctx.fillText('gearbox 4:1', (cxB+cxS)/2 + R*.55, h-10); ctx.fillText('generator', cx, h-10);
+      ctx.textAlign = 'left';
+    } else {
+      // solar panel -> DC wires -> inverter (H-bridge of four switches) -> pulsed output
+      var sx = 40, sy = padT + 24, cols = 5, rows = 4, sk = 7, pl = 22, xe = ix - 56, ch = 15, pt = cy + 8;
+      var cw = (xe - pl - rows*sk)/cols, out = pulse(simT);
+      ctx.fillStyle = accent; ctx.strokeStyle = accent; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(sx,sy,13,0,TAU); ctx.fill();
+      for (var ry = 0; ry < 8; ry++){ var an2 = ry*TAU/8; ctx.beginPath(); ctx.moveTo(sx+19*Math.cos(an2), sy+19*Math.sin(an2)); ctx.lineTo(sx+27*Math.cos(an2), sy+27*Math.sin(an2)); ctx.stroke(); }
+      ctx.lineWidth = 1.5; ctx.globalAlpha = .6; ctx.setLineDash([5,5]); ctx.lineDashOffset = -last/40;
+      [.5,2.5,4.5].forEach(function(c){ ctx.beginPath(); ctx.moveTo(sx+10, sy+20); ctx.lineTo(pl + rows*sk + c*cw, pt-3); ctx.stroke(); });
+      ctx.setLineDash([]); ctx.globalAlpha = 1;
+      for (var rr = 0; rr < rows; rr++) for (var cc = 0; cc < cols; cc++){
+        var qx = pl + cc*cw + (rows-rr)*sk, qy = pt + rr*ch;
+        ctx.beginPath(); ctx.moveTo(qx,qy); ctx.lineTo(qx+cw-2,qy); ctx.lineTo(qx+cw-2-sk,qy+ch-2); ctx.lineTo(qx-sk,qy+ch-2); ctx.closePath();
+        ctx.fillStyle = trace; ctx.globalAlpha = .85; ctx.fill(); ctx.globalAlpha = 1;
+        ctx.strokeStyle = css('--ghost'); ctx.lineWidth = 1; ctx.stroke();
+      }
+      [cy+28, cy+40].forEach(function(wy){                                           // DC wires with flowing dashes
+        ctx.strokeStyle = ink; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(xe-8,wy); ctx.lineTo(ix,wy); ctx.stroke();
+        ctx.strokeStyle = accent; ctx.setLineDash([3,9]); ctx.lineDashOffset = -last/30;
+        ctx.beginPath(); ctx.moveTo(xe-8,wy); ctx.lineTo(ix,wy); ctx.stroke(); ctx.setLineDash([]);
+      });
+      var by = cy - R - 12, bh = 2*R + 24;                                           // inverter box and H-bridge
+      ctx.fillStyle = card; ctx.strokeStyle = muted; ctx.lineWidth = 1.5;
+      ctx.fillRect(ix, by, bw, bh); ctx.strokeRect(ix, by, bw, bh);
+      var lx = ix + bw*.3, rx = ix + bw*.7, y1 = cy - R*.55, y2 = cy + R*.55, sq = Math.max(10, bw*.1);
+      ctx.strokeStyle = ink; ctx.lineWidth = 1.5; ctx.beginPath();
+      ctx.moveTo(lx,y1); ctx.lineTo(rx,y1); ctx.moveTo(lx,y2); ctx.lineTo(rx,y2);
+      ctx.moveTo(lx,y1); ctx.lineTo(lx,y2); ctx.moveTo(rx,y1); ctx.lineTo(rx,y2); ctx.moveTo(lx,cy); ctx.lineTo(rx,cy); ctx.stroke();
+      [[lx,-1,out>0],[rx,-1,out<0],[lx,1,out<0],[rx,1,out>0]].forEach(function(sw){
+        var sy2 = cy + sw[1]*R*.275;
+        ctx.fillStyle = sw[2] ? accent : card; ctx.strokeStyle = ink; ctx.lineWidth = 1.5;
+        ctx.fillRect(sw[0]-sq/2, sy2-sq/2, sq, sq); ctx.strokeRect(sw[0]-sq/2, sy2-sq/2, sq, sq);
+      });
+      ctx.fillStyle = muted; ctx.font = '12px ui-monospace,Menlo,Consolas,monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('inverter', ix+bw/2, by+12); ctx.fillText('+', lx-11, y1); ctx.fillText('\u2212', lx-11, y2);
+      ctx.fillText('DC', (xe+ix)/2, cy+14); ctx.fillText('solar panel', (pl+xe)/2, h-10);
+      ctx.textAlign = 'left';
     }
 
+    if (solar){                                    // carrier (faint) and the switched output (pale)
+      var NS = 1200, i2, ag;
+      ctx.lineCap = 'butt'; ctx.lineJoin = 'miter';
+      ctx.strokeStyle = muted; ctx.globalAlpha = .5; ctx.lineWidth = 1; ctx.beginPath();
+      for (i2 = 0; i2 <= NS; i2++){
+        ag = WIN*i2/NS; var uu = (((simT-ag)*FC) % 1 + 1) % 1, yc = cy - R*1.1*(4*Math.abs(uu-.5) - 1);
+        i2 ? ctx.lineTo(X(ag),yc) : ctx.moveTo(X(ag),yc);
+      }
+      ctx.stroke(); ctx.globalAlpha = 1;
+      ctx.strokeStyle = css('--ghost'); ctx.lineWidth = 1.5; ctx.beginPath();
+      for (i2 = 0; i2 <= NS; i2++){
+        ag = WIN*i2/NS; var yp = cy - R*pulse(simT-ag);
+        i2 ? ctx.lineTo(X(ag),yp) : ctx.moveTo(X(ag),yp);
+      }
+      ctx.stroke();
+    }
     // wave: value at "age" ms ago, so it unrolls to the right of the circle
     ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = 2.5; ctx.strokeStyle = trace;
     ctx.beginPath();
@@ -229,7 +327,7 @@ dt{color:var(--muted)} dd{margin:0;text-align:right;font-variant-numeric:tabular
 
     // radius, point on circle, tip of wave
     ctx.strokeStyle = trace; ctx.lineWidth = 2.5;
-    if (!gen){ ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(px,py); ctx.stroke(); }
+    if (mode === 'circle'){ ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(px,py); ctx.stroke(); }
     ctx.fillStyle = trace; ctx.beginPath(); ctx.arc(px,py,5,0,TAU); ctx.fill();
     ctx.fillStyle = accent; ctx.beginPath(); ctx.arc(x0,py,5.5,0,TAU); ctx.fill();
 
@@ -263,6 +361,14 @@ dt{color:var(--muted)} dd{margin:0;text-align:right;font-variant-numeric:tabular
       label:'A horizontal steam engine whose flywheel carries the magnet poles of an alternator; a dashed line carries the north pole height across to the 50 hertz voltage wave',
       lede:'The same idea built from iron: a horizontal steam engine of the 1890s. Steam pushes the piston to and fro, the connecting rod turns that into rotation, and the flywheel doubles as the rotor of an alternator, with magnet poles on its rim and a coil beside it. One turn of the flywheel is one cycle.',
       note:'The piston’s straight-line motion is the crank pin’s circle seen from the side, bent slightly away from a perfect cosine by the connecting rod. Engines like this ran at about 100 rpm, so their alternators had around 60 poles to reach 50 Hz; a 3000 rpm steam turbine needs only two. This drawing shows a two-pole rotor, so one turn gives one cycle, slowed so you can follow it.'},
+    wind:{
+      label:'A wind turbine: slowly turning blades drive a gearbox that spins a generator rotor fast, with a dashed line carrying the rotor pole height across to the 50 hertz voltage wave',
+      lede:'Wind turns the same circle, but slowly: big blades make only about 15 turns a minute. A gearbox steps that up roughly a hundred times, so the generator spins at 1500 rpm (four poles) or 3000 rpm (two poles) and its coils deliver 50 Hz.',
+      note:'The gearbox here is drawn at 4:1 and the rotor has two poles, so the blades are still slow enough to watch; one turn of the generator is one cycle. Many newer turbines drop the fixed link to the grid: the blades run at whatever speed the wind allows and a power converter produces a clean 50 Hz, the same trick the solar tab shows.'},
+    solar:{
+      label:'A solar panel feeding an inverter: four switches flip the direct current on and off in pulses of varying width, and a dashed line carries the output level to a 50 hertz sine wave',
+      lede:'A solar panel has no moving parts and makes direct current, which is steady rather than alternating. The 50 Hz is manufactured by an inverter: four electronic switches flip the panel’s voltage one way, then the other, so fast that the pulses can be smoothed into a sine wave.',
+      note:'The pale pulses are what the switches actually output; the blue line is what is left after filtering. The pulses are widest where the wave is highest, because each is set by comparing a 50 Hz reference sine with a fast zigzag carrier (the faint line), drawn here at 1 kHz; real inverters switch at 4 to 20 kHz. The 50 Hz is just the inverter’s clock, kept in step with the grid. The filled squares are the switches currently on.'},
     generator:{
       label:'An alternator: a bar-magnet rotor spinning between two coils, with a dashed line carrying the north pole height across to the 50 hertz voltage wave',
       lede:'This is where the 50 Hz comes from. In a power station a turbine, driven by steam, spins a magnet (the rotor) inside fixed coils of copper wire. Every turn of the magnet takes the coil voltage through one full cycle, so a two-pole rotor at 3000 rpm gives exactly 50 Hz.',
@@ -275,17 +381,18 @@ dt{color:var(--muted)} dd{margin:0;text-align:right;font-variant-numeric:tabular
     });
     lede.textContent = TEXT[m].lede; note.textContent = TEXT[m].note + SOUND;
     stage.setAttribute('aria-label', TEXT[m].label);
-    rVl.textContent = m === 'circle' ? 'height (sin)' : 'coil voltage';
-    stage.parentNode.classList.toggle('wide', m === 'steam');
+    rVl.textContent = m === 'circle' ? 'height (sin)' : m === 'solar' ? 'output voltage' : 'coil voltage';
+    stage.parentNode.classList.toggle('wide', ['steam','wind','solar'].indexOf(m) >= 0);
   }
-  function fromHash(){ setMode(location.hash === '#generator' ? 'generator' : location.hash === '#steam' ? 'steam' : 'circle'); }
+  var MODES = ['circle','generator','steam','wind','solar'];
+  function fromHash(){ setMode(MODES.indexOf(location.hash.slice(1)) >= 0 ? location.hash.slice(1) : 'circle'); }
   window.addEventListener('hashchange', fromHash);
   document.querySelector('.tabs').addEventListener('click', function(e){
     var b = e.target.closest('button'); if (b) location.hash = b.dataset.mode;
   });
   document.querySelector('.tabs').addEventListener('keydown', function(e){
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-    var order = ['circle','generator','steam'], to = order[(order.indexOf(mode) + (e.key === 'ArrowRight' ? 1 : 2)) % 3]; location.hash = to; document.getElementById('tab-' + to).focus();
+    var to = MODES[(MODES.indexOf(mode) + (e.key === 'ArrowRight' ? 1 : MODES.length-1)) % MODES.length]; location.hash = to; document.getElementById('tab-' + to).focus();
   });
 
   slow.addEventListener('input', labelSlow);
