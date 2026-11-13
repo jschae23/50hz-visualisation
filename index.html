@@ -44,12 +44,23 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
 dl{display:grid;grid-template-columns:auto 1fr;gap:2px 14px;margin:0;font:.95rem/1.5 ui-monospace,Menlo,Consolas,monospace}
 dt{color:var(--muted)} dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
 .note{font-size:.88rem;color:var(--muted);margin-top:1.4rem;max-width:62ch}
+.panel.wide{overflow-x:auto}
+.panel.wide canvas{min-width:720px}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--grid-strong);margin-bottom:1.4rem}
+.tabs button{border:0;border-bottom:3px solid transparent;border-radius:0;padding:8px 16px;color:var(--muted);margin-bottom:-1px}
+.tabs button:hover{border-color:transparent;color:var(--ink)}
+.tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
 </style>
 </head>
 <body>
 <main>
+  <div class="tabs" role="tablist" aria-label="Views">
+    <button role="tab" id="tab-circle" data-mode="circle" aria-selected="true">Circle &amp; wave</button>
+    <button role="tab" id="tab-generator" data-mode="generator" aria-selected="false" tabindex="-1">Generator</button>
+    <button role="tab" id="tab-steam" data-mode="steam" aria-selected="false" tabindex="-1">Steam engine</button>
+  </div>
   <h1>50<small>Hz</small></h1>
-  <p class="lede">Fifty complete cycles every second, so one cycle lasts exactly 20 milliseconds. That is the rhythm of mains electricity across Europe, Asia, Africa and much of South America. Slow it down to watch a circle draw the wave.</p>
+  <p class="lede" id="lede">Fifty complete cycles every second, so one cycle lasts exactly 20 milliseconds. That is the rhythm of mains electricity across Europe, Asia, Africa and much of South America. Slow it down to watch a circle draw the wave.</p>
 
   <div class="panel"><canvas id="stage" role="img" aria-label="A point circling a unit circle once per cycle, with a dashed line carrying its height across to a sine wave at 50 hertz"></canvas></div>
 
@@ -67,11 +78,11 @@ dt{color:var(--muted)} dd{margin:0;text-align:right;font-variant-numeric:tabular
       <dt>period</dt><dd>20 ms</dd>
       <dt>time in cycle</dt><dd id="rT">0.0 ms</dd>
       <dt>angle</dt><dd id="rP">0°</dd>
-      <dt>height (sin)</dt><dd id="rV">0.00</dd>
+      <dt id="rVl">height (sin)</dt><dd id="rV">0.00</dd>
     </dl>
   </div>
 
-  <p class="note">The point goes once around the circle every 20 ms. The dashed line carries its height across, and the wave unrolls to the right, newest value on the left. Sound needs headphones or a subwoofer, since most laptop and phone speakers can’t reproduce 50 Hz.</p>
+  <p class="note" id="note">The point goes once around the circle every 20 ms. The dashed line carries its height across, and the wave unrolls to the right, newest value on the left. Sound needs headphones or a subwoofer, since most laptop and phone speakers can’t reproduce 50 Hz.</p>
 </main>
 
 <script>
@@ -84,7 +95,7 @@ dt{color:var(--muted)} dd{margin:0;text-align:right;font-variant-numeric:tabular
   var rT = document.getElementById('rT'), rP = document.getElementById('rP'), rV = document.getElementById('rV');
   var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   var playing = !reduce, simT = 0, last = performance.now(), dpr = 1;
-  var audio = null, osc = null;
+  var audio = null, osc = null, mode = 'circle';
 
   function css(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
   function factor(){ return Math.pow(10, parseFloat(slow.value)); }
@@ -96,9 +107,12 @@ dt{color:var(--muted)} dd{margin:0;text-align:right;font-variant-numeric:tabular
     ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,h);
 
     var padT = 16, padB = 30, padL = 12, padR = 14;
-    var R = Math.min((h-padT-padB)/2, w*0.2);
-    var cx = padL + R + 6, cy = padT + (h-padT-padB)/2;
-    var x0 = cx + R + Math.min(64, w*0.08), x1 = w - padR, pw = x1 - x0;
+    var steam = mode === 'steam', gen = mode !== 'circle';   // gen: alternator-style figure
+    var E = gen ? 1.4 : 1, lead = steam ? 2.75 : E;          // right / left extent of the figure, in units of R
+    var R = steam ? Math.min((h-padT-padB)/2/E, (w*.56-padL-6)/(lead+E))
+                  : Math.min((h-padT-padB)/2/E, w*0.2/E);
+    var cx = padL + R*lead + 6, cy = padT + (h-padT-padB)/2;
+    var x0 = cx + R*E + Math.min(64, w*0.08), x1 = w - padR, pw = x1 - x0;
     var X = function(age){ return x0 + age/WIN*pw; };
     var grid = css('--grid'), strong = css('--grid-strong'), muted = css('--muted');
     var trace = css('--trace'), accent = css('--accent');
@@ -119,16 +133,85 @@ dt{color:var(--muted)} dd{margin:0;text-align:right;font-variant-numeric:tabular
       ctx.beginPath(); ctx.moveTo(x0,cy-v*R); ctx.lineTo(x1,cy-v*R); ctx.stroke();
     });
 
-    // circle with axes
-    ctx.strokeStyle = strong;
-    ctx.beginPath(); ctx.arc(cx,cy,R,0,TAU); ctx.stroke();
-    ctx.strokeStyle = grid;
-    ctx.beginPath(); ctx.moveTo(cx-R-6,cy); ctx.lineTo(cx+R+6,cy); ctx.moveTo(cx,cy-R-6); ctx.lineTo(cx,cy+R+6); ctx.stroke();
-
     var a = TAU*F*simT, px = cx + R*Math.cos(a), py = cy - R*Math.sin(a);
     var swept = ((a % TAU) + TAU) % TAU;
-    ctx.fillStyle = css('--ghost'); ctx.globalAlpha = .45;
-    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.arc(cx,cy,R*.26,0,-swept,true); ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
+    if (!gen){
+      // circle with axes
+      ctx.strokeStyle = strong;
+      ctx.beginPath(); ctx.arc(cx,cy,R,0,TAU); ctx.stroke();
+      ctx.strokeStyle = grid;
+      ctx.beginPath(); ctx.moveTo(cx-R-6,cy); ctx.lineTo(cx+R+6,cy); ctx.moveTo(cx,cy-R-6); ctx.lineTo(cx,cy+R+6); ctx.stroke();
+      ctx.fillStyle = css('--ghost'); ctx.globalAlpha = .45;
+      ctx.beginPath(); ctx.moveTo(cx,cy); ctx.arc(cx,cy,R*.26,0,-swept,true); ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
+    } else if (!steam) {
+      // alternator: iron stator ring, two copper coils, spinning bar-magnet rotor
+      ctx.lineWidth = R*.26; ctx.strokeStyle = strong;
+      ctx.beginPath(); ctx.arc(cx,cy,R*1.25,0,TAU); ctx.stroke();
+      var k = Math.abs(Math.sin(a));              // coil glows with |voltage|
+      [cx+R*1.1, cx-R*1.4].forEach(function(bx){
+        ctx.fillStyle = accent; ctx.globalAlpha = .2 + .8*k;
+        ctx.fillRect(bx, cy-R*.28, R*.3, R*.56); ctx.globalAlpha = 1;
+        ctx.strokeStyle = muted; ctx.lineWidth = 1; ctx.strokeRect(bx, cy-R*.28, R*.3, R*.56);
+        for (var j = 1; j < 4; j++){ ctx.beginPath(); ctx.moveTo(bx,cy-R*.28+j*R*.14); ctx.lineTo(bx+R*.3,cy-R*.28+j*R*.14); ctx.stroke(); }
+      });
+      ctx.save(); ctx.translate(cx,cy); ctx.rotate(-a);
+      var t = R*.2;
+      ctx.fillStyle = accent; ctx.fillRect(0,-t,R,2*t);
+      ctx.fillStyle = trace;  ctx.fillRect(-R,-t,R,2*t);
+      ctx.fillStyle = css('--paper'); ctx.font = 'bold ' + Math.round(R*.2) + 'px ui-sans-serif,system-ui,sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      [['N',R*.62],['S',-R*.62]].forEach(function(p){
+        ctx.save(); ctx.translate(p[1],0); ctx.rotate(a); ctx.fillText(p[0],0,0); ctx.restore();
+      });
+      ctx.restore();
+      ctx.fillStyle = css('--paper'); ctx.beginPath(); ctx.arc(cx,cy,R*.06,0,TAU); ctx.fill();
+      ctx.textAlign = 'left'; ctx.font = '12px ui-monospace,Menlo,Consolas,monospace';
+    } else {
+      // horizontal steam engine; its flywheel carries the alternator's magnet poles
+      var rc = R*.38, L = R*1.6, Pr = R*.6, card = css('--card'), ink = css('--ink');
+      var pinx = cx + rc*Math.cos(a), piny = cy - rc*Math.sin(a);
+      var xc = pinx - Math.sqrt(L*L - Math.pow(rc*Math.sin(a),2)), xp = xc - Pr;   // crosshead and piston
+      var xl = cx - 2.75*R, xr = cx - 1.72*R;
+      ctx.lineWidth = 1; ctx.strokeStyle = muted;
+      ctx.fillStyle = strong; ctx.fillRect(xl, cy+.34*R, 1.35*R, .09*R);                 // bedplate
+      ctx.fillStyle = card;
+      ctx.fillRect(xl, cy-.24*R, xr-xl, .48*R); ctx.strokeRect(xl, cy-.24*R, xr-xl, .48*R);   // cylinder
+      ctx.fillRect(xl+.25*R, cy-.38*R, .6*R, .14*R); ctx.strokeRect(xl+.25*R, cy-.38*R, .6*R, .14*R); // steam chest
+      ctx.fillStyle = strong; ctx.fillRect(xl+.5*R, cy-.63*R, .1*R, .25*R);                 // steam supply pipe
+      ctx.fillStyle = muted; ctx.textAlign = 'center';
+      ctx.fillText('steam in', xl+.55*R, cy-.7*R);
+      ctx.lineWidth = R*.03;                                                              // crosshead guides
+      [-1,1].forEach(function(sg){ ctx.beginPath(); ctx.moveTo(cx-2.05*R, cy+sg*.13*R); ctx.lineTo(cx-1.15*R, cy+sg*.13*R); ctx.stroke(); });
+      // stator ring and one coil (glows with |voltage|)
+      ctx.lineWidth = R*.26; ctx.strokeStyle = strong;
+      ctx.beginPath(); ctx.arc(cx,cy,R*1.25,0,TAU); ctx.stroke();
+      var k = Math.abs(Math.sin(a)), bx = cx + R*1.1;
+      ctx.fillStyle = accent; ctx.globalAlpha = .2 + .8*k; ctx.fillRect(bx, cy-R*.28, R*.3, R*.56); ctx.globalAlpha = 1;
+      ctx.strokeStyle = muted; ctx.lineWidth = 1; ctx.strokeRect(bx, cy-R*.28, R*.3, R*.56);
+      for (var j = 1; j < 4; j++){ ctx.beginPath(); ctx.moveTo(bx,cy-R*.28+j*R*.14); ctx.lineTo(bx+R*.3,cy-R*.28+j*R*.14); ctx.stroke(); }
+      // flywheel: rim, spokes, and the two magnet poles on the rim
+      ctx.save(); ctx.translate(cx,cy); ctx.rotate(-a);
+      ctx.fillStyle = card; ctx.beginPath(); ctx.arc(0,0,R*.9,0,TAU); ctx.fill();
+      ctx.strokeStyle = ink; ctx.lineWidth = R*.07; ctx.beginPath(); ctx.arc(0,0,R*.86,0,TAU); ctx.stroke();
+      ctx.lineWidth = R*.05;
+      for (var q = 0; q < 6; q++){ var an = q*TAU/6 + .3; ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(R*.86*Math.cos(an), R*.86*Math.sin(an)); ctx.stroke(); }
+      ctx.fillStyle = accent; ctx.fillRect(R*.8, -R*.16, R*.2, R*.32);
+      ctx.fillStyle = trace;  ctx.fillRect(-R, -R*.16, R*.2, R*.32);
+      ctx.fillStyle = css('--paper'); ctx.font = 'bold ' + Math.round(R*.15) + 'px ui-sans-serif,system-ui,sans-serif'; ctx.textBaseline = 'middle';
+      [['N',R*.9],['S',-R*.9]].forEach(function(t){ ctx.save(); ctx.translate(t[1],0); ctx.rotate(a); ctx.fillText(t[0],0,0); ctx.restore(); });
+      ctx.restore();
+      // crank disc, connecting rod, piston rod, piston, crosshead (in front of the flywheel)
+      ctx.fillStyle = card; ctx.strokeStyle = muted; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(cx,cy,R*.5,0,TAU); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = ink; ctx.lineWidth = R*.07; ctx.beginPath(); ctx.moveTo(pinx,piny); ctx.lineTo(xc,cy); ctx.stroke();
+      ctx.lineWidth = R*.045; ctx.beginPath(); ctx.moveTo(xp,cy); ctx.lineTo(xc,cy); ctx.stroke();
+      ctx.fillStyle = ink; ctx.fillRect(xp-R*.05, cy-R*.21, R*.1, R*.42); ctx.fillRect(xc-R*.09, cy-R*.09, R*.18, R*.18);
+      ctx.beginPath(); ctx.arc(cx,cy,R*.05,0,TAU); ctx.fill();
+      ctx.fillStyle = accent; ctx.beginPath(); ctx.arc(pinx,piny,R*.06,0,TAU); ctx.fill();
+      ctx.fillStyle = muted; ctx.font = '12px ui-monospace,Menlo,Consolas,monospace'; ctx.textBaseline = 'middle';
+      ctx.fillText('cylinder & piston', (xl+xr)/2, h-10); ctx.fillText('flywheel + rotor', cx, h-10); ctx.fillText('coil', cx+1.25*R, h-10);
+      ctx.textAlign = 'left';
+    }
 
     // wave: value at "age" ms ago, so it unrolls to the right of the circle
     ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = 2.5; ctx.strokeStyle = trace;
@@ -146,7 +229,7 @@ dt{color:var(--muted)} dd{margin:0;text-align:right;font-variant-numeric:tabular
 
     // radius, point on circle, tip of wave
     ctx.strokeStyle = trace; ctx.lineWidth = 2.5;
-    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(px,py); ctx.stroke();
+    if (!gen){ ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(px,py); ctx.stroke(); }
     ctx.fillStyle = trace; ctx.beginPath(); ctx.arc(px,py,5,0,TAU); ctx.fill();
     ctx.fillStyle = accent; ctx.beginPath(); ctx.arc(x0,py,5.5,0,TAU); ctx.fill();
 
@@ -169,6 +252,42 @@ dt{color:var(--muted)} dd{margin:0;text-align:right;font-variant-numeric:tabular
     requestAnimationFrame(frame);
   }
 
+  var lede = document.getElementById('lede'), note = document.getElementById('note'), rVl = document.getElementById('rVl');
+  var SOUND = ' Sound needs headphones or a subwoofer, since most laptop and phone speakers can\u2019t reproduce 50 Hz.';
+  var TEXT = {
+    circle:{
+      label:'A point circling a unit circle once per cycle, with a dashed line carrying its height across to a sine wave at 50 hertz',
+      lede:'Fifty complete cycles every second, so one cycle lasts exactly 20 milliseconds. That is the rhythm of mains electricity across Europe, Asia, Africa and much of South America. Slow it down to watch a circle draw the wave.',
+      note:'The point goes once around the circle every 20 ms. The dashed line carries its height across, and the wave unrolls to the right, newest value on the left.'},
+    steam:{
+      label:'A horizontal steam engine whose flywheel carries the magnet poles of an alternator; a dashed line carries the north pole height across to the 50 hertz voltage wave',
+      lede:'The same idea built from iron: a horizontal steam engine of the 1890s. Steam pushes the piston to and fro, the connecting rod turns that into rotation, and the flywheel doubles as the rotor of an alternator, with magnet poles on its rim and a coil beside it. One turn of the flywheel is one cycle.',
+      note:'The piston’s straight-line motion is the crank pin’s circle seen from the side, bent slightly away from a perfect cosine by the connecting rod. Engines like this ran at about 100 rpm, so their alternators had around 60 poles to reach 50 Hz; a 3000 rpm steam turbine needs only two. This drawing shows a two-pole rotor, so one turn gives one cycle, slowed so you can follow it.'},
+    generator:{
+      label:'An alternator: a bar-magnet rotor spinning between two coils, with a dashed line carrying the north pole height across to the 50 hertz voltage wave',
+      lede:'This is where the 50 Hz comes from. In a power station a turbine, driven by steam, spins a magnet (the rotor) inside fixed coils of copper wire. Every turn of the magnet takes the coil voltage through one full cycle, so a two-pole rotor at 3000 rpm gives exactly 50 Hz.',
+      note:'The rotor’s north pole plays the part of the point on the circle. When it points straight at a coil the magnetic flux is at its maximum but not changing, so the voltage is zero; as it sweeps past, the flux changes fastest and the voltage peaks. The coils glow with the size of the voltage. Machines with more poles run slower: 1500 rpm with four poles gives the same 50 Hz.'}
+  };
+  function setMode(m){
+    mode = m;
+    document.querySelectorAll('.tabs button').forEach(function(b){
+      var on = b.dataset.mode === m; b.setAttribute('aria-selected', on); b.tabIndex = on ? 0 : -1;
+    });
+    lede.textContent = TEXT[m].lede; note.textContent = TEXT[m].note + SOUND;
+    stage.setAttribute('aria-label', TEXT[m].label);
+    rVl.textContent = m === 'circle' ? 'height (sin)' : 'coil voltage';
+    stage.parentNode.classList.toggle('wide', m === 'steam');
+  }
+  function fromHash(){ setMode(location.hash === '#generator' ? 'generator' : location.hash === '#steam' ? 'steam' : 'circle'); }
+  window.addEventListener('hashchange', fromHash);
+  document.querySelector('.tabs').addEventListener('click', function(e){
+    var b = e.target.closest('button'); if (b) location.hash = b.dataset.mode;
+  });
+  document.querySelector('.tabs').addEventListener('keydown', function(e){
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    var order = ['circle','generator','steam'], to = order[(order.indexOf(mode) + (e.key === 'ArrowRight' ? 1 : 2)) % 3]; location.hash = to; document.getElementById('tab-' + to).focus();
+  });
+
   slow.addEventListener('input', labelSlow);
   playBtn.addEventListener('click', function(){
     playing = !playing; playBtn.textContent = playing ? 'Pause' : 'Play'; playBtn.setAttribute('aria-pressed', !playing);
@@ -184,7 +303,7 @@ dt{color:var(--muted)} dd{margin:0;text-align:right;font-variant-numeric:tabular
     }catch(e){ soundBtn.disabled = true; soundBtn.textContent = 'Sound unavailable'; }
   });
   if (reduce){ playBtn.textContent = 'Play'; playBtn.setAttribute('aria-pressed','true'); }
-  labelSlow(); requestAnimationFrame(frame);
+  labelSlow(); fromHash(); requestAnimationFrame(frame);
 })();
 </script>
 </body>
