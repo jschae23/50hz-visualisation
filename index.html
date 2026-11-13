@@ -28,15 +28,12 @@ h1{font-size:clamp(3.2rem,12vw,6.5rem);line-height:.95;margin:0 0 .2em;font-weig
 h1 small{font-size:.38em;color:var(--muted);letter-spacing:0;margin-left:.15em}
 .lede{max-width:52ch;margin:0 0 1.6rem;color:var(--muted)}
 .panel{background:var(--card);border:1px solid var(--grid-strong);border-radius:6px;padding:12px}
-canvas{display:block;width:100%}
-#scope{height:300px}
-.row{display:grid;grid-template-columns:1fr 260px;gap:16px;margin-top:16px}
-@media (max-width:700px){.row{grid-template-columns:1fr}}
-#phasor{height:260px}
-.controls{display:flex;flex-direction:column;gap:14px;justify-content:center}
+canvas{display:block;width:100%;height:340px}
+.controls{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:16px;align-items:center}
+@media (max-width:640px){.controls{grid-template-columns:1fr}}
 label{display:block;font-size:.92rem;color:var(--muted);margin-bottom:4px}
 input[type=range]{width:100%;accent-color:var(--trace)}
-.btns{display:flex;gap:8px;flex-wrap:wrap}
+.btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 button{
   font:inherit;font-size:.95rem;color:var(--ink);background:transparent;
   border:1px solid var(--grid-strong);border-radius:4px;padding:6px 14px;cursor:pointer;
@@ -52,39 +49,36 @@ dt{color:var(--muted)} dd{margin:0;text-align:right;font-variant-numeric:tabular
 <body>
 <main>
   <h1>50<small>Hz</small></h1>
-  <p class="lede">Fifty complete cycles every second, so one cycle lasts exactly 20 milliseconds. That is the rhythm of mains electricity across Europe, Asia, Africa and much of South America. Slow it down to watch it turn.</p>
+  <p class="lede">Fifty complete cycles every second, so one cycle lasts exactly 20 milliseconds. That is the rhythm of mains electricity across Europe, Asia, Africa and much of South America. Slow it down to watch a circle draw the wave.</p>
 
-  <div class="panel"><canvas id="scope" role="img" aria-label="Sine wave at 50 hertz shown over 60 milliseconds, three cycles"></canvas></div>
+  <div class="panel"><canvas id="stage" role="img" aria-label="A point circling a unit circle once per cycle, with a dashed line carrying its height across to a sine wave at 50 hertz"></canvas></div>
 
-  <div class="row">
-    <div class="panel controls">
-      <div>
-        <label for="slow">Slow motion: <span id="slowLabel"></span></label>
-        <input id="slow" type="range" min="0" max="3" step="0.01" value="1.7">
-      </div>
+  <div class="panel controls">
+    <div>
+      <label for="slow">Slow motion: <span id="slowLabel"></span></label>
+      <input id="slow" type="range" min="0" max="3" step="0.01" value="1.7">
       <div class="btns">
         <button id="play" aria-pressed="false">Pause</button>
         <button id="sound" aria-pressed="false">Hear it</button>
       </div>
-      <dl>
-        <dt>frequency</dt><dd>50 Hz</dd>
-        <dt>period</dt><dd>20 ms</dd>
-        <dt>time</dt><dd id="rT">0.0 ms</dd>
-        <dt>phase</dt><dd id="rP">0°</dd>
-        <dt>value</dt><dd id="rV">0.00</dd>
-      </dl>
     </div>
-    <div class="panel"><canvas id="phasor" role="img" aria-label="Rotating vector whose vertical height traces the sine wave"></canvas></div>
+    <dl>
+      <dt>frequency</dt><dd>50 Hz</dd>
+      <dt>period</dt><dd>20 ms</dd>
+      <dt>time in cycle</dt><dd id="rT">0.0 ms</dd>
+      <dt>angle</dt><dd id="rP">0°</dd>
+      <dt>height (sin)</dt><dd id="rV">0.00</dd>
+    </dl>
   </div>
 
-  <p class="note">The arrow on the right turns once per cycle; its height is the wave’s value. Sound needs headphones or a subwoofer, since most laptop and phone speakers can’t reproduce 50 Hz.</p>
+  <p class="note">The point goes once around the circle every 20 ms. The dashed line carries its height across, and the wave unrolls to the right, newest value on the left. Sound needs headphones or a subwoofer, since most laptop and phone speakers can’t reproduce 50 Hz.</p>
 </main>
 
 <script>
 (function(){
-  var F = 50, WIN = 0.060;               // frequency (Hz), visible window (s)
-  var scope = document.getElementById('scope'), ph = document.getElementById('phasor');
-  var sctx = scope.getContext('2d'), pctx = ph.getContext('2d');
+  var F = 50, WIN = 0.060;               // frequency (Hz), history shown to the right (s)
+  var TAU = 2*Math.PI;
+  var stage = document.getElementById('stage'), ctx = stage.getContext('2d');
   var slow = document.getElementById('slow'), slowLabel = document.getElementById('slowLabel');
   var playBtn = document.getElementById('play'), soundBtn = document.getElementById('sound');
   var rT = document.getElementById('rT'), rP = document.getElementById('rP'), rV = document.getElementById('rV');
@@ -95,93 +89,83 @@ dt{color:var(--muted)} dd{margin:0;text-align:right;font-variant-numeric:tabular
   function css(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
   function factor(){ return Math.pow(10, parseFloat(slow.value)); }
 
-  function fit(c){
+  function draw(){
     dpr = window.devicePixelRatio || 1;
-    var r = c.getBoundingClientRect();
-    c.width = Math.round(r.width * dpr); c.height = Math.round(r.height * dpr);
-    return {w:r.width, h:r.height};
-  }
-
-  function drawScope(){
-    var s = fit(scope), w = s.w, h = s.h, ctx = sctx;
+    var r = stage.getBoundingClientRect(), w = r.width, h = r.height;
+    stage.width = Math.round(w*dpr); stage.height = Math.round(h*dpr);
     ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,h);
-    var padL = 34, padR = 12, padT = 14, padB = 28;
-    var pw = w - padL - padR, ph_ = h - padT - padB, mid = padT + ph_/2, amp = ph_/2 * .88;
-    var X = function(t){ return padL + t/WIN*pw; };
-    var Y = function(v){ return mid - v*amp; };
-    ctx.font = '12px ui-monospace,Menlo,Consolas,monospace'; ctx.textBaseline = 'middle';
-    // grid: every 5 ms, strong every 20 ms (one cycle)
+
+    var padT = 16, padB = 30, padL = 12, padR = 14;
+    var R = Math.min((h-padT-padB)/2, w*0.2);
+    var cx = padL + R + 6, cy = padT + (h-padT-padB)/2;
+    var x0 = cx + R + Math.min(64, w*0.08), x1 = w - padR, pw = x1 - x0;
+    var X = function(age){ return x0 + age/WIN*pw; };
+    var grid = css('--grid'), strong = css('--grid-strong'), muted = css('--muted');
+    var trace = css('--trace'), accent = css('--accent');
+
+    // wave grid: a line every 5 ms, stronger every 20 ms (one cycle)
+    ctx.font = '12px ui-monospace,Menlo,Consolas,monospace'; ctx.textBaseline = 'middle'; ctx.lineWidth = 1;
     for (var ms = 0; ms <= 60; ms += 5){
-      var x = X(ms/1000); ctx.strokeStyle = ms % 20 === 0 ? css('--grid-strong') : css('--grid');
-      ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x,padT); ctx.lineTo(x,padT+ph_); ctx.stroke();
-      if (ms % 10 === 0){ ctx.fillStyle = css('--muted'); ctx.textAlign = 'center'; ctx.fillText(ms + ' ms', x, h - 10); }
-    }
-    [-1,-.5,0,.5,1].forEach(function(v){
-      ctx.strokeStyle = v === 0 ? css('--grid-strong') : css('--grid');
-      ctx.beginPath(); ctx.moveTo(padL,Y(v)); ctx.lineTo(padL+pw,Y(v)); ctx.stroke();
-      if (v % 1 === 0){ ctx.fillStyle = css('--muted'); ctx.textAlign = 'right'; ctx.fillText((v>0?'+':'')+v, padL-6, Y(v)); }
-    });
-    // playhead position inside window
-    var tp = simT % WIN;
-    function trace(t0,t1){
-      ctx.beginPath();
-      for (var i = 0; i <= 240; i++){
-        var t = t0 + (t1-t0)*i/240, px = X(t), py = Y(Math.sin(2*Math.PI*F*t));
-        i ? ctx.lineTo(px,py) : ctx.moveTo(px,py);
+      var gx = X(ms/1000);
+      ctx.strokeStyle = ms % 20 === 0 ? strong : grid;
+      ctx.beginPath(); ctx.moveTo(gx,cy-R-6); ctx.lineTo(gx,cy+R+6); ctx.stroke();
+      if (ms % 20 === 0){
+        ctx.fillStyle = muted; ctx.textAlign = ms === 60 ? 'right' : 'center';
+        ctx.fillText(ms === 0 ? 'now' : '\u2212' + ms + ' ms', gx, h - 10);
       }
-      ctx.stroke();
     }
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = 2.5;
-    ctx.strokeStyle = css('--ghost'); trace(0, WIN);
-    ctx.strokeStyle = css('--trace'); trace(0, tp);
-    // playhead
-    var hx = X(tp), hy = Y(Math.sin(2*Math.PI*F*tp));
-    ctx.strokeStyle = css('--accent'); ctx.lineWidth = 1.5; ctx.setLineDash([4,4]);
-    ctx.beginPath(); ctx.moveTo(hx,padT); ctx.lineTo(hx,padT+ph_); ctx.stroke(); ctx.setLineDash([]);
-    ctx.fillStyle = css('--accent'); ctx.beginPath(); ctx.arc(hx,hy,5.5,0,7); ctx.fill();
-    return tp;
-  }
+    [-1,0,1].forEach(function(v){
+      ctx.strokeStyle = v === 0 ? strong : grid;
+      ctx.beginPath(); ctx.moveTo(x0,cy-v*R); ctx.lineTo(x1,cy-v*R); ctx.stroke();
+    });
 
-  function drawPhasor(tp){
-    var s = fit(ph), w = s.w, h = s.h, ctx = pctx;
-    ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,w,h);
-    var cx = w/2, cy = h/2, R = Math.min(w,h)/2 - 18;
-    var a = 2*Math.PI*F*tp;
-    ctx.lineWidth = 1; ctx.strokeStyle = css('--grid-strong');
-    ctx.beginPath(); ctx.arc(cx,cy,R,0,7); ctx.stroke();
-    ctx.strokeStyle = css('--grid');
-    ctx.beginPath(); ctx.moveTo(cx-R-8,cy); ctx.lineTo(cx+R+8,cy); ctx.moveTo(cx,cy-R-8); ctx.lineTo(cx,cy+R+8); ctx.stroke();
-    // swept angle
+    // circle with axes
+    ctx.strokeStyle = strong;
+    ctx.beginPath(); ctx.arc(cx,cy,R,0,TAU); ctx.stroke();
+    ctx.strokeStyle = grid;
+    ctx.beginPath(); ctx.moveTo(cx-R-6,cy); ctx.lineTo(cx+R+6,cy); ctx.moveTo(cx,cy-R-6); ctx.lineTo(cx,cy+R+6); ctx.stroke();
+
+    var a = TAU*F*simT, px = cx + R*Math.cos(a), py = cy - R*Math.sin(a);
+    var swept = ((a % TAU) + TAU) % TAU;
     ctx.fillStyle = css('--ghost'); ctx.globalAlpha = .45;
-    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.arc(cx,cy,R*.28,0,-(a%(2*Math.PI)),true); ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
-    var px = cx + R*Math.cos(a), py = cy - R*Math.sin(a);
-    // projection onto vertical axis
-    ctx.strokeStyle = css('--accent'); ctx.setLineDash([4,4]); ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.moveTo(px,py); ctx.lineTo(cx,py); ctx.stroke(); ctx.setLineDash([]);
-    ctx.fillStyle = css('--accent'); ctx.beginPath(); ctx.arc(cx,py,4.5,0,7); ctx.fill();
-    // vector
-    ctx.strokeStyle = css('--trace'); ctx.lineWidth = 2.5; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(px,py); ctx.stroke();
-    ctx.fillStyle = css('--trace'); ctx.beginPath(); ctx.arc(px,py,5.5,0,7); ctx.fill();
-  }
+    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.arc(cx,cy,R*.26,0,-swept,true); ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
 
-  function readouts(tp){
-    var a = ((2*Math.PI*F*tp) % (2*Math.PI)) * 180/Math.PI, v = Math.sin(2*Math.PI*F*tp);
-    rT.textContent = (tp*1000).toFixed(1) + ' ms';
-    rP.textContent = Math.round(a) + '°';
-    rV.textContent = (v>=0?'+':'') + v.toFixed(2);
+    // wave: value at "age" ms ago, so it unrolls to the right of the circle
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = 2.5; ctx.strokeStyle = trace;
+    ctx.beginPath();
+    for (var i = 0; i <= 300; i++){
+      var age = WIN*i/300, v = Math.sin(TAU*F*(simT-age));
+      var wx = X(age), wy = cy - v*R;
+      i ? ctx.lineTo(wx,wy) : ctx.moveTo(wx,wy);
+    }
+    ctx.stroke();
+
+    // connector: carries the point's height across to the start of the wave
+    ctx.strokeStyle = accent; ctx.lineWidth = 1.5; ctx.setLineDash([5,4]);
+    ctx.beginPath(); ctx.moveTo(px,py); ctx.lineTo(x0,py); ctx.stroke(); ctx.setLineDash([]);
+
+    // radius, point on circle, tip of wave
+    ctx.strokeStyle = trace; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(px,py); ctx.stroke();
+    ctx.fillStyle = trace; ctx.beginPath(); ctx.arc(px,py,5,0,TAU); ctx.fill();
+    ctx.fillStyle = accent; ctx.beginPath(); ctx.arc(x0,py,5.5,0,TAU); ctx.fill();
+
+    // readouts
+    rT.textContent = ((simT % (1/F))*1000).toFixed(1) + ' ms';
+    rP.textContent = Math.round(swept*180/Math.PI) + '\u00b0';
+    var s = Math.sin(a); rV.textContent = (s>=0?'+':'') + s.toFixed(2);
   }
 
   function labelSlow(){
     var f = factor(), cyc = f/F;
-    slowLabel.textContent = (f < 1.5 ? 'real time (blurs)' : Math.round(f) + '× slower') +
-      (f >= 1.5 ? ', one cycle per ' + (cyc < 1 ? Math.round(cyc*1000) + ' ms' : cyc.toFixed(1) + ' s') : '');
+    slowLabel.textContent = f < 1.5 ? 'real time (blurs)' :
+      Math.round(f) + '\u00d7 slower, one cycle per ' + (cyc < 1 ? Math.round(cyc*1000) + ' ms' : cyc.toFixed(1) + ' s');
   }
 
   function frame(now){
     var dt = Math.min(.1, (now - last)/1000); last = now;
-    if (playing) simT += dt / factor();
-    var tp = drawScope(); drawPhasor(simT % WIN); readouts(simT % WIN);
+    if (playing) simT = (simT + dt/factor()) % 1;   // 1 s = exactly 50 cycles, so the wrap is seamless
+    draw();
     requestAnimationFrame(frame);
   }
 
@@ -191,9 +175,7 @@ dt{color:var(--muted)} dd{margin:0;text-align:right;font-variant-numeric:tabular
   });
   soundBtn.addEventListener('click', function(){
     try{
-      if (!audio){
-        audio = new (window.AudioContext || window.webkitAudioContext)();
-      }
+      if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)();
       if (osc){ osc.stop(); osc = null; soundBtn.setAttribute('aria-pressed','false'); soundBtn.textContent = 'Hear it'; return; }
       osc = audio.createOscillator(); var g = audio.createGain();
       osc.type = 'sine'; osc.frequency.value = F; g.gain.value = .25;
